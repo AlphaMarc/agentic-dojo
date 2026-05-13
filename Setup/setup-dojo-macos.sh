@@ -174,7 +174,7 @@ Pendant l'atelier, nous créerons une app web locale avec :
 Commandes de départ pendant le dojo :
 
 ```bash
-cd ~/dojo-agentic-web
+cd ~/Documents/dojo-agentic-web
 firebase login
 npm create vite@latest feedback-wall -- --template react
 cd feedback-wall
@@ -205,7 +205,7 @@ final_check() {
   echo "Environnement prêt."
   echo ""
   echo "À lancer pendant le dojo :"
-  echo "cd ~/dojo-agentic-web"
+  echo "cd ~/Documents/dojo-agentic-web"
   echo "firebase login"
   echo "npm create vite@latest feedback-wall -- --template react"
 }
