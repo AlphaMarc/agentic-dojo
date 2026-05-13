@@ -43,6 +43,33 @@ function Test-CommandExists {
   return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+# Runs a native command (npm, winget, etc.) without letting stderr output
+# trigger PowerShell's NativeCommandError under $ErrorActionPreference = "Stop".
+# Streams stdout+stderr to the host as plain text and validates $LASTEXITCODE.
+function Invoke-NativeCli {
+  param(
+    [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+    [string]$ErrorMessage = "Command failed"
+  )
+
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $exit = 0
+  try {
+    & $ScriptBlock 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($null -ne $LASTEXITCODE) {
+      $exit = $LASTEXITCODE
+    }
+  }
+  finally {
+    $ErrorActionPreference = $previousPreference
+  }
+
+  if ($exit -ne 0) {
+    throw "$ErrorMessage (exit code $exit)"
+  }
+}
+
 function Update-SessionPath {
   $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $user = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -72,7 +99,10 @@ function Invoke-WingetInstall {
   )
 
   Write-LogStep "Installation via winget : $Label ($Id)"
-  & winget install --id $Id -e --accept-source-agreements --accept-package-agreements --disable-interactivity 2>&1 | ForEach-Object { Write-Host $_ }
+  $block = {
+    & winget install --id $Id -e --accept-source-agreements --accept-package-agreements --disable-interactivity
+  }.GetNewClosure()
+  Invoke-NativeCli -ErrorMessage "winget install $Id a échoué" -ScriptBlock $block
   Update-SessionPath
 }
 
@@ -130,7 +160,8 @@ function Ensure-NpmGlobal {
   }
 
   Write-Host "Installation de $PackageName..."
-  npm install -g $PackageName 2>&1 | ForEach-Object { Write-Host $_ }
+  $installBlock = { & npm install -g $PackageName }.GetNewClosure()
+  Invoke-NativeCli -ErrorMessage "npm install -g $PackageName a échoué" -ScriptBlock $installBlock
   Update-SessionPath
 
   if (Test-CommandExists $BinaryName) {
@@ -141,16 +172,17 @@ function Ensure-NpmGlobal {
 
   $npmPrefix = Join-Path $env:USERPROFILE ".npm-global"
   New-Item -ItemType Directory -Path $npmPrefix -Force | Out-Null
-  npm config set prefix $npmPrefix 2>&1 | ForEach-Object { Write-Host $_ }
+  $prefixBlock = { & npm config set prefix $npmPrefix }.GetNewClosure()
+  Invoke-NativeCli -ErrorMessage "npm config set prefix a échoué" -ScriptBlock $prefixBlock
 
-  $npmGlobalBin = (& npm bin -g 2>$null)
-  if ([string]::IsNullOrWhiteSpace($npmGlobalBin)) {
-    $npmGlobalBin = Join-Path $npmPrefix "bin"
-  }
+  # Sur Windows, les binaires npm globaux vivent directement dans le préfixe
+  # (pas dans un sous-dossier bin/ comme sous Unix). `npm bin -g` a été
+  # supprimé en npm 9+, on ne peut donc plus s'appuyer dessus.
+  $npmGlobalBin = $npmPrefix
   Add-UserPathEntry -Directory $npmGlobalBin
   $env:Path = "$npmGlobalBin;$env:Path"
 
-  npm install -g $PackageName 2>&1 | ForEach-Object { Write-Host $_ }
+  Invoke-NativeCli -ErrorMessage "npm install -g $PackageName a échoué" -ScriptBlock $installBlock
   Update-SessionPath
 
   if (-not (Test-CommandExists $BinaryName)) {
