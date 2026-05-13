@@ -135,6 +135,16 @@ ensure_npm_global() {
   npm install -g "$package"
 }
 
+ensure_firebase_cli() {
+  ensure_npm_global firebase firebase-tools@latest
+
+  if ! has_command firebase; then
+    echo "Firebase CLI installé, mais la commande firebase n'est pas disponible dans le PATH."
+    echo "Fermez et rouvrez le terminal, puis relancez le script."
+    exit 1
+  fi
+}
+
 create_workspace() {
   log "Création du dossier de travail"
 
@@ -200,7 +210,7 @@ main() {
   ensure_brew_formula node
 
   log "Installation des outils Firebase et agentiques"
-  ensure_npm_global firebase firebase-tools
+  ensure_firebase_cli
 
   if [[ "$INSTALL_CURSOR" == "1" ]]; then
     ensure_brew_cask cursor "Cursor"
