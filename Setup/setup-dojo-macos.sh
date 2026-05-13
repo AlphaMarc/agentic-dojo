@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOJO_DIR="${HOME}/dojo-agentic-web"
+DOJO_DIR="${HOME}/Documents/dojo-agentic-web"
 
 # Mettre à 0 si vous ne voulez pas installer Cursor automatiquement.
 INSTALL_CURSOR="${INSTALL_CURSOR:-1}"
