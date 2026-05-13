@@ -1,10 +1,6 @@
 # Dojo Agentique
 
-C'est la manière la plus efficace d'animer un Dojo. En laissant les PM construire leurs propres idées, vous augmentez leur implication concrète.
-
 Le défi d'une session de 60 minutes, c'est le scope creep. Pour le gérer, cette feuille de progression se concentre sur des jalons fonctionnels plutôt que sur des fonctionnalités précises. Elle considère Cursor comme "l'équipe d'ingénierie" et le PM comme le "Tech Lead".
-
-Voici la feuille de progression universelle pour construire un MVP en 60 minutes.
 
 ## Le Dojo "Founder" en 60 minutes
 
