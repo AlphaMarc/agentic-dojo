@@ -49,48 +49,113 @@ $script:WingetInstallBenignExitCodes = @(
   -1978335189
 )
 
-function Test-PowerShellSupportsNativeCommandErrorPreference {
-  # PS 7.2+: stderr from native exes can become terminating NativeCommandError when
-  # $PSNativeCommandUseErrorActionPreference is true (npm warnings, winget text, etc.).
-  $v = $PSVersionTable.PSVersion
-  return ($v.Major -gt 7) -or (($v.Major -eq 7) -and ($v.Minor -ge 2))
+function Test-PSNativeCommandStderrPreferenceAvailable {
+  # PS 7.2+ exposes this; probing is more reliable than parsing $PSVersionTable (7.0 vs 7.2, etc.).
+  return $null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)
 }
 
-# Runs a native command (npm, winget, etc.) without letting stderr output
-# trigger PowerShell's NativeCommandError under $ErrorActionPreference = "Stop".
-# Streams stdout+stderr to the host as plain text and validates $LASTEXITCODE.
-function Invoke-NativeCli {
+# Runs a full cmd.exe /c line with stderr merged inside cmd (... 2>&1) so PowerShell never
+# attaches native stderr from node.exe (npm deprecation warnings -> NativeCommandError when Stop is set).
+# Uses Start-Process so exit codes work on Windows PowerShell 5.1 and PowerShell 7+.
+function Invoke-CmdExeLine {
   param(
-    [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
+    [Parameter(Mandatory = $true)][string]$Line,
     [string]$ErrorMessage = "Command failed",
     [int[]]$TreatAsSuccessExitCodes = @()
   )
 
-  $previousPreference = $ErrorActionPreference
+  $prevEap = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  $previousNativeErrPref = $null
-  if (Test-PowerShellSupportsNativeCommandErrorPreference) {
-    $previousNativeErrPref = $PSNativeCommandUseErrorActionPreference
-    $PSNativeCommandUseErrorActionPreference = $false
-  }
   $exit = 0
   try {
-    & $ScriptBlock 2>&1 | ForEach-Object { Write-Host $_ }
-    if ($null -ne $LASTEXITCODE) {
-      $exit = $LASTEXITCODE
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/s", "/c", $Line) -Wait -PassThru -NoNewWindow
+    if ($null -ne $proc.ExitCode) {
+      $exit = $proc.ExitCode
     }
   }
   finally {
-    if ($null -ne $previousNativeErrPref) {
-      $PSNativeCommandUseErrorActionPreference = $previousNativeErrPref
-    }
-    $ErrorActionPreference = $previousPreference
+    $ErrorActionPreference = $prevEap
   }
 
   $ok = ($exit -eq 0) -or ($TreatAsSuccessExitCodes -contains $exit)
   if (-not $ok) {
     throw "$ErrorMessage (exit code $exit)"
   }
+}
+
+function Invoke-CmdExeLineCapture {
+  param(
+    [Parameter(Mandatory = $true)][string]$Line
+  )
+
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "cmd.exe"
+  $psi.Arguments = '/d /s /c "' + ($Line -replace '"', '\"') + '"'
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.CreateNoWindow = $true
+
+  $p = New-Object System.Diagnostics.Process
+  $p.StartInfo = $psi
+  try {
+    [void]$p.Start()
+    $p.WaitForExit()
+    $out = $p.StandardOutput.ReadToEnd()
+    $err = $p.StandardError.ReadToEnd()
+    if ($p.ExitCode -ne 0) {
+      throw "Command failed (exit code $($p.ExitCode)): $Line"
+    }
+    $parts = @()
+    if (-not [string]::IsNullOrWhiteSpace($out)) {
+      $parts += $out.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($err)) {
+      $parts += $err.Trim()
+    }
+    return ($parts -join "`n").Trim()
+  }
+  finally {
+    if ($null -ne $p) {
+      $p.Dispose()
+    }
+  }
+}
+
+function Get-SetupFirstMeaningfulLine {
+  param([string]$Text)
+  if ([string]::IsNullOrWhiteSpace($Text)) {
+    return ""
+  }
+  return (($Text -split "`r?`n") | Where-Object { $_.Trim().Length -gt 0 } | Select-Object -First 1).Trim()
+}
+
+function Get-NpmCmdCallForCmdExe {
+  # Prefer npm.cmd next to node.exe so cmd never runs npm.ps1 / a PowerShell shim (which would
+  # still surface node.exe stderr to this PowerShell session as NativeCommandError).
+  $nodeCmd = Get-Command node -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -eq $nodeCmd) {
+    return "call npm"
+  }
+  $nodeDir = Split-Path -Parent $nodeCmd.Source
+  $npmCmd = Join-Path $nodeDir "npm.cmd"
+  if (Test-Path -LiteralPath $npmCmd) {
+    return ('call "' + ($npmCmd -replace '"', '""') + '"')
+  }
+  return "call npm"
+}
+
+function Get-GlobalCmdCallForCmdExe {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  $info = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -eq $info) {
+    return "call $Name"
+  }
+  $src = $info.Source
+  if ($src -match '\.(cmd|exe|bat)$') {
+    return ('call "' + ($src -replace '"', '""') + '"')
+  }
+  return "call $Name"
 }
 
 function Update-SessionPath {
@@ -122,10 +187,8 @@ function Invoke-WingetInstall {
   )
 
   Write-LogStep "Installation via winget : $Label ($Id)"
-  $block = {
-    & winget install --id $Id -e --accept-source-agreements --accept-package-agreements --disable-interactivity
-  }.GetNewClosure()
-  Invoke-NativeCli -ErrorMessage "winget install $Id a échoué" -ScriptBlock $block `
+  $line = "winget install --id $Id -e --accept-source-agreements --accept-package-agreements --disable-interactivity 2>&1"
+  Invoke-CmdExeLine -Line $line -ErrorMessage "winget install $Id a échoué" `
     -TreatAsSuccessExitCodes $script:WingetInstallBenignExitCodes
   Update-SessionPath
 }
@@ -184,8 +247,10 @@ function Ensure-NpmGlobal {
   }
 
   Write-Host "Installation de $PackageName..."
-  $installBlock = { & npm install -g $PackageName }.GetNewClosure()
-  Invoke-NativeCli -ErrorMessage "npm install -g $PackageName a échoué" -ScriptBlock $installBlock
+  $npmCall = Get-NpmCmdCallForCmdExe
+  $pkgEsc = ($PackageName -replace '"', '""')
+  $installLine = "$npmCall install -g `"$pkgEsc`" 2>&1"
+  Invoke-CmdExeLine -Line $installLine -ErrorMessage "npm install -g $PackageName a échoué"
   Update-SessionPath
 
   if (Test-CommandExists $BinaryName) {
@@ -196,8 +261,9 @@ function Ensure-NpmGlobal {
 
   $npmPrefix = Join-Path $env:USERPROFILE ".npm-global"
   New-Item -ItemType Directory -Path $npmPrefix -Force | Out-Null
-  $prefixBlock = { & npm config set prefix $npmPrefix }.GetNewClosure()
-  Invoke-NativeCli -ErrorMessage "npm config set prefix a échoué" -ScriptBlock $prefixBlock
+  $pfxEsc = ($npmPrefix -replace '"', '""')
+  $prefixLine = "$npmCall config set prefix `"$pfxEsc`" 2>&1"
+  Invoke-CmdExeLine -Line $prefixLine -ErrorMessage "npm config set prefix a échoué"
 
   # Sur Windows, les binaires npm globaux vivent directement dans le préfixe
   # (pas dans un sous-dossier bin/ comme sous Unix). `npm bin -g` a été
@@ -206,7 +272,7 @@ function Ensure-NpmGlobal {
   Add-UserPathEntry -Directory $npmGlobalBin
   $env:Path = "$npmGlobalBin;$env:Path"
 
-  Invoke-NativeCli -ErrorMessage "npm install -g $PackageName a échoué" -ScriptBlock $installBlock
+  Invoke-CmdExeLine -Line $installLine -ErrorMessage "npm install -g $PackageName a échoué"
   Update-SessionPath
 
   if (-not (Test-CommandExists $BinaryName)) {
@@ -293,10 +359,38 @@ npm run dev
 function Show-FinalCheck {
   Write-LogStep "Vérification finale"
 
-  Write-Host ("Git: " + (& git --version))
-  Write-Host ("Node: " + (& node -v))
-  Write-Host ("npm: " + (& npm -v))
-  Write-Host ("Firebase: " + (& firebase --version))
+  $npmCall = Get-NpmCmdCallForCmdExe
+  $gitCall = Get-GlobalCmdCallForCmdExe git
+  $nodeCall = Get-GlobalCmdCallForCmdExe node
+  $firebaseCall = Get-GlobalCmdCallForCmdExe firebase
+
+  try {
+    Write-Host ("Git: " + (Get-SetupFirstMeaningfulLine (Invoke-CmdExeLineCapture "$gitCall --version 2>&1")))
+  }
+  catch {
+    Write-Host "Git: (version indisponible)"
+  }
+
+  try {
+    Write-Host ("Node: " + (Get-SetupFirstMeaningfulLine (Invoke-CmdExeLineCapture "$nodeCall -v 2>&1")))
+  }
+  catch {
+    Write-Host "Node: (version indisponible)"
+  }
+
+  try {
+    Write-Host ("npm: " + (Get-SetupFirstMeaningfulLine (Invoke-CmdExeLineCapture "$npmCall -v 2>&1")))
+  }
+  catch {
+    Write-Host "npm: (version indisponible)"
+  }
+
+  try {
+    Write-Host ("Firebase: " + (Get-SetupFirstMeaningfulLine (Invoke-CmdExeLineCapture "$firebaseCall --version 2>&1")))
+  }
+  catch {
+    Write-Host "Firebase: (version indisponible)"
+  }
 
   if ($env:INSTALL_CURSOR -eq "1") {
     if (Test-CursorInstalled) {
@@ -335,4 +429,18 @@ function Main {
   Show-FinalCheck
 }
 
-Main
+$script:_savedPsNativeCliErrPref = $null
+$script:_capturedPsNativeCliErrPref = $false
+try {
+  if (Test-PSNativeCommandStderrPreferenceAvailable) {
+    $script:_savedPsNativeCliErrPref = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+    $script:_capturedPsNativeCliErrPref = $true
+  }
+  Main
+}
+finally {
+  if ($script:_capturedPsNativeCliErrPref) {
+    $PSNativeCommandUseErrorActionPreference = $script:_savedPsNativeCliErrPref
+  }
+}
