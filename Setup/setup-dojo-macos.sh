@@ -159,29 +159,7 @@ create_workspace() {
   log "Création du dossier de travail"
 
   mkdir -p "$DOJO_DIR"
-
-  cat > "${DOJO_DIR}/README_DOJO.md" <<'EOF'
-# Dojo Agentic Web
-
-Pendant l'atelier, nous créerons une app web locale avec :
-
-- React + Vite
-- Firebase Authentication
-- Google Sign-In
-- Firestore
-- un agent de développement
-
-Commandes de départ pendant le dojo :
-
-```bash
-cd ~/Documents/dojo-agentic-web
-firebase login
-npm create vite@latest feedback-wall -- --template react
-cd feedback-wall
-npm install
-npm run dev
-```
-EOF
+  
   echo "Dossier prêt : ${DOJO_DIR}"
 }
 
