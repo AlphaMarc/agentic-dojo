@@ -52,11 +52,12 @@ Prépare mon projet pour le Dojo.
 6. Vérifie que je suis connecté à Firebase avec npx -y firebase-tools@latest projects:list. Si je ne suis pas connecté, lance npx -y firebase-tools@latest login et attends que je termine.
 7. Crée un nouveau projet Firebase avec ce nom en utilisant npx -y firebase-tools@latest projects:create.
 8. Crée un fichier firebase.json puis associe ce projet Firebase au dossier local avec npx -y firebase-tools@latest use --add.
-9. Active les services dont nous auront besoin sur la région Europe : 
+9. Active les services firebase dont nous auront besoin sur la région Europe. Utilise uniquement la CLI firebase, n'utilise en aucun cas la cli google cloud : 
     9.1 : authentification avec google uniquement, 
     9.2 : firestore database, active l'API firebase et initialise avec une collection test puis vérifie sa présence pour valider la bonne initialisation. Crée également index et rules de base.
     9.3 : website hosting classic, crée une petite page web toute simple "dojo cursor PM" puis déploie là et vérifie le bon déploiement
 10. À la fin, affiche le chemin du dossier, le nom du projet Firebase, le Project ID Firebase et les prochaines étapes manuelles à faire dans la Firebase Console.
+11. Fais un premier commit sur le repo git
 
 Avant chaque commande qui crée ou modifie quelque chose, explique rapidement ce que tu vas faire.
 ```

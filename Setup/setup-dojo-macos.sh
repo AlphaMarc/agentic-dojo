@@ -115,11 +115,11 @@ ensure_npm_global() {
 
   echo "Installation de $package..."
 
-  if npm install -g "$package"; then
+  if npm install -g "$package" && has_command "$binary"; then
     return
   fi
 
-  warn "Installation globale npm échouée. Configuration d'un préfixe utilisateur npm."
+  warn "Installation globale npm échouée ou $binary absent du PATH. Configuration d'un préfixe utilisateur npm."
 
   mkdir -p "${HOME}/.npm-global"
   npm config set prefix "${HOME}/.npm-global"
@@ -132,7 +132,17 @@ ensure_npm_global() {
   fi
 
   export PATH="${HOME}/.npm-global/bin:${PATH}"
-  npm install -g "$package"
+  if ! npm install -g "$package"; then
+    echo "Échec de l'installation npm globale de $package (préfixe ~/.npm-global)."
+    echo "Consultez les messages d'erreur npm ci-dessus."
+    exit 1
+  fi
+
+  if ! has_command "$binary"; then
+    echo "$package semble installé, mais la commande $binary est toujours introuvable dans le PATH."
+    echo "Vérifiez la sortie de npm ci-dessus. Fermez et rouvrez le terminal si le PATH a été mis à jour dans ~/.zprofile."
+    exit 1
+  fi
 }
 
 ensure_firebase_cli() {
