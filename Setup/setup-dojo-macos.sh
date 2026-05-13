@@ -21,7 +21,7 @@ has_command() {
 ensure_macos() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "Ce script est prévu pour macOS."
-    echo "Pour Windows ou Linux, prévoir un script séparé."
+    echo "Pour Windows, utilisez Setup/setup-dojo-windows.ps1. Pour Linux, prévoir un script séparé."
     exit 1
   fi
 }
