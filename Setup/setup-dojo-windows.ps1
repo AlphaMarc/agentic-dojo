@@ -43,13 +43,20 @@ function Test-CommandExists {
   return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+# winget install often returns non-zero when the package is already installed and
+# there is no newer version (e.g. -1978335189 / 0x8A15002B). Treat as success.
+$script:WingetInstallBenignExitCodes = @(
+  -1978335189
+)
+
 # Runs a native command (npm, winget, etc.) without letting stderr output
 # trigger PowerShell's NativeCommandError under $ErrorActionPreference = "Stop".
 # Streams stdout+stderr to the host as plain text and validates $LASTEXITCODE.
 function Invoke-NativeCli {
   param(
     [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
-    [string]$ErrorMessage = "Command failed"
+    [string]$ErrorMessage = "Command failed",
+    [int[]]$TreatAsSuccessExitCodes = @()
   )
 
   $previousPreference = $ErrorActionPreference
@@ -65,7 +72,8 @@ function Invoke-NativeCli {
     $ErrorActionPreference = $previousPreference
   }
 
-  if ($exit -ne 0) {
+  $ok = ($exit -eq 0) -or ($TreatAsSuccessExitCodes -contains $exit)
+  if (-not $ok) {
     throw "$ErrorMessage (exit code $exit)"
   }
 }
@@ -102,7 +110,8 @@ function Invoke-WingetInstall {
   $block = {
     & winget install --id $Id -e --accept-source-agreements --accept-package-agreements --disable-interactivity
   }.GetNewClosure()
-  Invoke-NativeCli -ErrorMessage "winget install $Id a échoué" -ScriptBlock $block
+  Invoke-NativeCli -ErrorMessage "winget install $Id a échoué" -ScriptBlock $block `
+    -TreatAsSuccessExitCodes $script:WingetInstallBenignExitCodes
   Update-SessionPath
 }
 
