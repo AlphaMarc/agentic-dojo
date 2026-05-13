@@ -49,6 +49,13 @@ $script:WingetInstallBenignExitCodes = @(
   -1978335189
 )
 
+function Test-PowerShellSupportsNativeCommandErrorPreference {
+  # PS 7.2+: stderr from native exes can become terminating NativeCommandError when
+  # $PSNativeCommandUseErrorActionPreference is true (npm warnings, winget text, etc.).
+  $v = $PSVersionTable.PSVersion
+  return ($v.Major -gt 7) -or (($v.Major -eq 7) -and ($v.Minor -ge 2))
+}
+
 # Runs a native command (npm, winget, etc.) without letting stderr output
 # trigger PowerShell's NativeCommandError under $ErrorActionPreference = "Stop".
 # Streams stdout+stderr to the host as plain text and validates $LASTEXITCODE.
@@ -61,6 +68,11 @@ function Invoke-NativeCli {
 
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
+  $previousNativeErrPref = $null
+  if (Test-PowerShellSupportsNativeCommandErrorPreference) {
+    $previousNativeErrPref = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+  }
   $exit = 0
   try {
     & $ScriptBlock 2>&1 | ForEach-Object { Write-Host $_ }
@@ -69,6 +81,9 @@ function Invoke-NativeCli {
     }
   }
   finally {
+    if ($null -ne $previousNativeErrPref) {
+      $PSNativeCommandUseErrorActionPreference = $previousNativeErrPref
+    }
     $ErrorActionPreference = $previousPreference
   }
 
